@@ -1,11 +1,7 @@
 # main.py
 
 import logging
-from telegram import (
-    Update,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-)
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -32,17 +28,13 @@ SEARCH = 0
 
 # Keyboards
 def main_keyboard() -> ReplyKeyboardMarkup:
-    # Reply keyboard for main menu
-    user_count = len(db.get_all_user_ids())
-    header = [f"Usuarios registrados: {user_count}"]
     buttons = [
         [KeyboardButton("🔍 Buscar Perfiles"), KeyboardButton("🔔 Promociones")],
         [KeyboardButton("📄 Perfil"),           KeyboardButton("🛑 Salir")],
     ]
-    return ReplyKeyboardMarkup(header + buttons, resize_keyboard=True)
+    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def profile_menu_keyboard(has_profile: bool) -> ReplyKeyboardMarkup:
-    # Reply keyboard for profile submenu
     buttons = []
     if not has_profile:
         buttons.append([KeyboardButton("🆕 Crear Perfil")])
@@ -78,7 +70,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Usa los botones bajo teclado para navegar.\n"
-        "Envía /cancelar en cualquier flujo para volver al menú."
+        "Envía /cancelar para salir de cualquier flujo."
     )
 
 # Fallback to main menu
@@ -113,9 +105,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Fallback
     await update.message.reply_text(
-        "Opción no válida. Usa los botones.", reply_markup=main_keyboard()
+        "Opción no válida. Usa los botones.",
+        reply_markup=main_keyboard()
     )
 
 # Profile submenu handler
@@ -123,7 +115,7 @@ async def profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     uid = update.effective_user.id
 
-    if text == "🆕 Crear Perfil" or text == "✏️ Editar Perfil":
+    if text in ("🆕 Crear Perfil", "✏️ Editar Perfil"):
         await update.message.reply_text("📷 Por favor, envía tu foto de perfil:")
         return PHOTO
 
@@ -232,36 +224,34 @@ async def search_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "❤️ Me gusta":
         db.record_like(uid, cand.id)
-        # notifica al dueño
+        # notify owner with profile data and buttons
         await context.bot.send_photo(
             chat_id=cand.id,
             photo=cand.photo_file_id,
             caption=(
-                f"👤 @{update.effective_user.username} le gustó tu perfil.\n\n"
-                f"— Datos de quien te dio like —\n"
+                f"👤 @{update.effective_user.username} le gustó tu perfil\n\n"
                 f"👤 {update.effective_user.full_name}\n"
-                f"📍 {update.effective_user.location if hasattr(update.effective_user, 'location') else ''}\n"
-                f"{'@'+update.effective_user.username}\n\n"
-                "❤️ Me gusta    🚯 No me gusta    ✋ Salir"
+                f"📍 [país/provincia no disponible]\n\n"
+                "❤️   🚯   ✋"
             )
         )
-        # comprueba mutuo y envía contactos
+        # check mutual
         mutual = db.record_like(cand.id, uid)
         if mutual:
             await update.message.reply_text(
-                f"🎉 ¡Match mutuo con @{cand.username}! Podéis contactar ahora: @{update.effective_user.username}",
+                f"🎉 ¡Match mutuo con @{cand.username}! Ahora podéis contactar: @{update.effective_user.username}",
                 reply_markup=main_keyboard()
             )
-        else:
-            # avanza
-            context.user_data['idx'] += 1
-            return await show_next(update, context)
-
-    elif text == "🚯 No me gusta":
+            return ConversationHandler.END
+        # else continue
         context.user_data['idx'] += 1
         return await show_next(update, context)
 
-    elif text == "✋ Salir Búsqueda":
+    if text == "🚯 No me gusta":
+        context.user_data['idx'] += 1
+        return await show_next(update, context)
+
+    if text == "✋ Salir Búsqueda":
         await update.message.reply_text("Búsqueda detenida.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
@@ -269,13 +259,13 @@ async def search_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Volviendo al menú principal.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
-# Cancel
+# Cancel flow
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("Operación cancelada.", reply_markup=main_keyboard())
+    await update.
+context.reply_text("Operación cancelada.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
-# Application setup
 if __name__ == "__main__":
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 
@@ -283,7 +273,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
 
-    # Profile conversation
     perfil_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^📄 Perfil$"), handle_message)],
         states={
@@ -299,18 +288,14 @@ if __name__ == "__main__":
     )
     app.add_handler(perfil_conv)
 
-    # Search conversation
     search_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🔍 Buscar Perfiles$"), search_start)],
-        states={
-            SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_choice)]
-        },
+        states={SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_choice)]},
         fallbacks=[CommandHandler("cancelar", cancel)],
     )
     app.add_handler(search_conv)
 
-    # General fallback
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("🤖 Bot iniciado con Perfil y Buscar Perfiles bajo teclado")
+    logger.info("🤖 Bot iniciado correctamente")
     app.run_polling(drop_pending_updates=True)
