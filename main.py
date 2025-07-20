@@ -17,156 +17,115 @@ from telegram.ext import (
 import config
 from database import Database
 
-# Configuración de logging
+# Logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# Inicializamos la base de datos
+# Database init
 db = Database(config.DB_URL)
 
-# Estados para ConversationHandler de perfil
+# Conversation states for profile editing
 DESC, INSTA, GENDER, COUNTRY, CITY = range(5)
 
 def main_keyboard(is_premium: bool = False, is_admin: bool = False) -> ReplyKeyboardMarkup:
+    """
+    Four-button main keyboard: Pair, Promotions, Profile, Exit
+    """
     buttons = [
-        [KeyboardButton("👥 Emparejar")],
-        [KeyboardButton("🔔 Promociones")],
+        [KeyboardButton("👥 Emparejar"), KeyboardButton("🔔 Promociones")],
+        [KeyboardButton("📄 Perfil"),   KeyboardButton("🛑 Salir")],
     ]
-    if not is_premium:
-        buttons.append([KeyboardButton("💎 Hacerme Premium")])
-        buttons.append([KeyboardButton("🚫 No recibir Promos")])
-    buttons.append([KeyboardButton("📄 Perfil")])
-    if is_admin:
-        buttons.append([KeyboardButton("📣 Enviar Promos")])
-    buttons.append([KeyboardButton("🛑 Salir")])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
-# /start
+# /start handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.register_user(user.id, user.full_name)
-    is_prem = db.is_premium(user.id)
-    is_admin = (user.id == config.ADMIN_ID)
     text = (
-        "Leo: ¡Ligar. Citas y amigos! 💕\n"
-        "Ayuda 👉 @leomatchbot_help\n"
-        "Compra publicidad 👉 @ADinsidebot\n\n"
         f"¡Hola, {user.first_name}! 🤖\n"
-        "Bienvenido a LeoMatch Bot. Elige una opción del teclado:"
+        "Bienvenido a LeoMatch Bot. Elige una opción:"
     )
     await update.message.reply_text(
         text,
-        reply_markup=main_keyboard(is_prem, is_admin),
+        reply_markup=main_keyboard(),
     )
 
-# /help
+# /help handler
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Usa los botones del teclado para navegar por las opciones. 🤖\n"
-        "Para editar tu perfil usa /perfil\n"
-        "Para cancelar un flujo, envía /cancelar"
+        "Usa los botones del teclado para navegar. Usa /cancelar para salir de un flujo. 🤖"
     )
 
-# Manejo general de texto (botones principales)
+# General message handler for the four main buttons
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
-    is_prem = db.is_premium(user_id)
-    is_admin = (user_id == config.ADMIN_ID)
-
-    # Broadcast flow
-    if context.user_data.get("broadcasting"):
-        msg = text
-        for uid in db.get_all_user_ids():
-            await context.bot.send_message(chat_id=uid, text=msg)
-        context.user_data.pop("broadcasting")
-        await update.message.reply_text(
-            "✅ Promoción enviada a todos los usuarios.",
-            reply_markup=main_keyboard(is_prem, is_admin),
-        )
-        return
 
     if text == "👥 Emparejar":
+        is_prem = db.is_premium(user_id)
         matches = db.get_matches(version=is_prem)
         reply = "Tu lista de matches:\n" + "\n".join(matches) if matches else "No hay matches aún."
 
     elif text == "🔔 Promociones":
+        is_prem = db.is_premium(user_id)
         reply = (
-            "Para recibir promociones, primero hazte Premium con 💎 Hacerme Premium"
-            if not is_prem else "No hay promociones nuevas 🤝"
+            "Para recibir promociones, hazte Premium 💎" if not is_prem
+            else "No hay promociones nuevas 🤝"
         )
-
-    elif text == "💎 Hacerme Premium":
-        db.set_premium(user_id)
-        reply = "¡Felicidades! Ahora eres usuario Premium 🎉"
-
-    elif text == "🚫 No recibir Promos":
-        db.set_no_promos(user_id)
-        reply = "Has elegido no recibir más promociones. Puedes volver con /start."
 
     elif text == "📄 Perfil":
         return await perfil_start(update, context)
 
-    elif text == "📣 Enviar Promos" and is_admin:
-        context.user_data["broadcasting"] = True
-        await update.message.reply_text(
-            "✉️ Envíame el mensaje que deseas enviar a todos los usuarios:",
-            reply_markup=main_keyboard(is_prem, is_admin),
-        )
-        return
-
     elif text == "🛑 Salir":
         db.unregister_user(user_id)
-        reply = "Has salido. Si deseas volver, usa /start 👋"
+        reply = "Has salido. Usa /start para volver. 👋"
 
     else:
-        reply = "Opción no reconocida. Por favor, usa los botones del teclado."
+        reply = "Opción no válida. Usa los botones."
 
     await update.message.reply_text(
         reply,
-        reply_markup=main_keyboard(is_prem, is_admin),
+        reply_markup=main_keyboard(),
     )
 
-# ----------------- Flujo de perfil -----------------
+# --- Profile editing flow ---
 
 async def perfil_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Por favor, envíame una breve descripción de tu perfil o /cancelar para salir:",
-    )
+    await update.message.reply_text("📝 Enviar descripción de tu perfil (o /cancelar):")
     return DESC
 
 async def perfil_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['description'] = update.message.text
-    await update.message.reply_text("¿Cuál es tu usuario de Instagram? (sin @):")
+    await update.message.reply_text("📸 Envía tu usuario de Instagram (sin @):")
     return INSTA
 
 async def perfil_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['instagram'] = update.message.text
     await update.message.reply_text(
-        "Selecciona tu género:",
+        "👤 Selecciona tu género:",
         reply_markup=ReplyKeyboardMarkup(
             [["Masculino"], ["Femenino"], ["Otro"], ["/cancelar"]],
-            resize_keyboard=True,
-        ),
+            resize_keyboard=True
+        )
     )
     return GENDER
 
 async def perfil_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['gender'] = update.message.text
-    await update.message.reply_text("¿En qué país vives?")
+    await update.message.reply_text("🌍 ¿En qué país vives?")
     return COUNTRY
 
 async def perfil_country(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['country'] = update.message.text
-    await update.message.reply_text("¿Y en qué ciudad o provincia?")
+    await update.message.reply_text("🏙️ ¿Ciudad o provincia?")
     return CITY
 
 async def perfil_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['city'] = update.message.text
-    # Guardar en BD
+    # Save profile to DB
     db.update_profile(
         update.effective_user.id,
         context.user_data['description'],
@@ -175,38 +134,35 @@ async def perfil_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['country'],
         context.user_data['city'],
     )
-    # Mostrar resumen
-    text = (
-        "Perfil actualizado:\n"
+    summary = (
+        "✅ Perfil actualizado!\n"
         f"📝 {context.user_data['description']}\n"
-        f"📸 https://instagram.com/{context.user_data['instagram']}\n"
+        f"📸 instagram.com/{context.user_data['instagram']}\n"
         f"👤 {context.user_data['gender']}\n"
         f"📍 {context.user_data['city']}, {context.user_data['country']}"
     )
-    await update.message.reply_text(
-        text,
-        reply_markup=main_keyboard(db.is_premium(update.effective_user.id), update.effective_user.id==config.ADMIN_ID),
-    )
     context.user_data.clear()
+    await update.message.reply_text(summary, reply_markup=main_keyboard())
     return ConversationHandler.END
 
 async def perfil_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Operación de perfil cancelada.",
-        reply_markup=main_keyboard(db.is_premium(update.effective_user.id), update.effective_user.id==config.ADMIN_ID),
-    )
     context.user_data.clear()
+    await update.message.reply_text(
+        "❌ Edición de perfil cancelada.",
+        reply_markup=main_keyboard()
+    )
     return ConversationHandler.END
 
-# ----------------- Arranque -----------------
+# --- Main launch ---
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 
-    # Handlers
+    # Command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
 
+    # Profile conversation
     perfil_conv = ConversationHandler(
         entry_points=[CommandHandler("perfil", perfil_start)],
         states={
@@ -220,7 +176,8 @@ if __name__ == "__main__":
     )
     app.add_handler(perfil_conv)
 
+    # Main keyboard handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("🤖 Iniciando LeoMatch Bot...")
+    logger.info("🤖 Bot iniciado con teclado simplificado y módulos de perfil")
     app.run_polling()
