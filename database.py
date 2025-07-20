@@ -45,7 +45,7 @@ class Like(Base):
     sender = relationship("User", foreign_keys=[user_id], back_populates="likes_sent")
     target = relationship("User", foreign_keys=[target_id], back_populates="likes_received")
 
-# Crea el motor y la sesión global, y asegúrate de crear las tablas:
+# Create engine and tables if they don't yet exist
 engine = create_engine(config.DB_URL, echo=False)
 Session = sessionmaker(bind=engine)
 Base.metadata.create_all(engine)
@@ -55,103 +55,103 @@ class Database:
         self.engine = create_engine(db_url, echo=False)
         self.Session = sessionmaker(bind=self.engine)
 
-    # Registro básico de usuario
+    # User registration
     def register_user(self, user_id, fullname):
-        s = self.Session()
-        if not s.get(User, user_id):
-            s.add(User(id=user_id, fullname=fullname))
-            s.commit()
-        s.close()
+        session = self.Session()
+        if not session.get(User, user_id):
+            session.add(User(id=user_id, fullname=fullname))
+            session.commit()
+        session.close()
 
     def unregister_user(self, user_id):
-        s = self.Session()
-        u = s.get(User, user_id)
-        if u:
-            s.delete(u)
-            s.commit()
-        s.close()
+        session = self.Session()
+        user = session.get(User, user_id)
+        if user:
+            session.delete(user)
+            session.commit()
+        session.close()
 
-    # Premium
+    # Premium status
     def set_premium(self, user_id):
-        s = self.Session()
-        u = s.get(User, user_id)
-        if u and not u.is_premium:
-            u.is_premium = True
-            s.commit()
-        s.close()
+        session = self.Session()
+        user = session.get(User, user_id)
+        if user and not user.is_premium:
+            user.is_premium = True
+            session.commit()
+        session.close()
 
     def is_premium(self, user_id):
-        s = self.Session()
-        u = s.get(User, user_id)
-        res = bool(u and u.is_premium)
-        s.close()
-        return res
+        session = self.Session()
+        user = session.get(User, user_id)
+        result = bool(user and user.is_premium)
+        session.close()
+        return result
 
-    # Perfil
+    # Profile methods
     def has_profile(self, user_id):
-        s = self.Session()
-        u = s.get(User, user_id)
-        res = bool(u and u.photo_file_id)
-        s.close()
-        return res
+        session = self.Session()
+        user = session.get(User, user_id)
+        result = bool(user and user.photo_file_id)
+        session.close()
+        return result
 
     def save_profile(self, user_id, photo_file_id, description, instagram, gender, country, city):
-        s = self.Session()
-        u = s.get(User, user_id)
-        if u:
-            u.photo_file_id = photo_file_id
-            u.description   = description
-            u.instagram     = instagram
-            u.gender        = gender
-            u.country       = country
-            u.city          = city
-            s.commit()
-        s.close()
+        session = self.Session()
+        user = session.get(User, user_id)
+        if user:
+            user.photo_file_id = photo_file_id
+            user.description   = description
+            user.instagram     = instagram
+            user.gender        = gender
+            user.country       = country
+            user.city          = city
+            session.commit()
+        session.close()
 
     def get_profile(self, user_id):
-        s = self.Session()
-        u = s.get(User, user_id)
-        s.close()
-        return u
+        session = self.Session()
+        user = session.get(User, user_id)
+        session.close()
+        return user
 
     def delete_profile(self, user_id):
-        s = self.Session()
-        u = s.get(User, user_id)
-        if u:
-            u.photo_file_id = ""
-            u.description   = ""
-            u.instagram     = ""
-            u.gender        = ""
-            u.country       = ""
-            u.city          = ""
-            s.commit()
-        s.close()
+        session = self.Session()
+        user = session.get(User, user_id)
+        if user:
+            user.photo_file_id = ""
+            user.description   = ""
+            user.instagram     = ""
+            user.gender        = ""
+            user.country       = ""
+            user.city          = ""
+            session.commit()
+        session.close()
 
-    # Matching y likes
+    # Matching and likes
     def get_potential_matches(self, user_id):
-        s = self.Session()
-        users = s.query(User).filter(
+        session = self.Session()
+        users = session.query(User).filter(
             User.id != user_id,
             User.photo_file_id != ""
         ).all()
-        s.close()
+        session.close()
         return users
 
     def record_like(self, user_id, target_id):
-        s = self.Session()
-        # Evita duplicados
-        exists = s.query(Like).filter_by(user_id=user_id, target_id=target_id).first()
-        if not exists:
-            s.add(Like(user_id=user_id, target_id=target_id))
-            s.commit()
-        # Comprueba reciprocidad
-        mutual = s.query(Like).filter_by(user_id=target_id, target_id=user_id).first()
-        s.close()
+        session = self.Session()
+        # Avoid duplicates
+        existing = session.query(Like).filter_by(user_id=user_id, target_id=target_id).first()
+        if not existing:
+            session.add(Like(user_id=user_id, target_id=target_id))
+            session.commit()
+        # Check mutual like
+        mutual = session.query(Like).filter_by(user_id=target_id, target_id=user_id).first()
+        session.close()
         return bool(mutual)
 
-    # Para envíos masivos o administración
+    # Utility
     def get_all_user_ids(self):
-        s = self.Session()
-        ids = [u.id for u in s.query(User).all()]
-        s.close()
+        session = self.Session()
+        ids = [u.id for u in session.query(User).all()]
+        session.close()
         return ids
