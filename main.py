@@ -53,7 +53,7 @@ def match_keyboard() -> ReplyKeyboardMarkup:
         ["🛑 Dejar Emparejar"]
     ], resize_keyboard=True)
 
-# — Handlers básicos —
+# Handlers básicos
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.register_user(user.id, user.full_name)
@@ -105,7 +105,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("Opción no válida. Usa los botones.", reply_markup=main_keyboard())
 
-# — Perfil: menú —
+# Perfil: menú
 async def profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     uid = update.effective_user.id
@@ -126,7 +126,7 @@ async def profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Opción inválida en Perfil.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
-# — Perfil: flujo de creación/edición —
+# Perfil: flujo de creación/edición
 async def perfil_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1].file_id
     context.user_data['photo'] = photo
@@ -168,7 +168,7 @@ async def perfil_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# — Emparejar flow —
+# Emparejar flow
 async def match_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     context.user_data['candidates'] = db.get_potential_matches(uid)
@@ -181,14 +181,20 @@ async def match_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_next_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     idx = context.user_data['idx']
     cand = context.user_data['candidates'][idx]
+    caption = (
+        f"👤 {cand.fullname}\n"
+        f"📍 {cand.city}, {cand.country}\n"
+        f"📸 instagram.com/{cand.instagram}\n\n"
+        f"{cand.description}"
+    )
+
+    # Solo muestra el @ si ambos se gustan
+    if db.has_liked(update.effective_user.id, cand.id):
+        caption += f"\n📩 Enlace de contacto: @{cand.instagram}"
+
     await update.message.reply_photo(
         photo=cand.photo_file_id,
-        caption=(
-            f"👤 {cand.fullname}\n"
-            f"📍 {cand.city}, {cand.country}\n"
-            f"📸 instagram.com/{cand.instagram}\n\n"
-            f"{cand.description}"
-        ),
+        caption=caption,
         reply_markup=match_keyboard()
     )
     return MATCH
@@ -200,16 +206,9 @@ async def match_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cand = context.user_data['candidates'][idx]
 
     if choice == "❤️ Me gusta":
-        # Notifica al dueño del perfil
-        await context.bot.send_photo(
-            chat_id=cand.id,
-            photo=cand.photo_file_id,
-            caption=f"👤 @{update.effective_user.username} le gustó tu perfil."
-        )
         # Registra el like y comprueba mutuo
         mutual = db.record_like(uid, cand.id)
         if mutual:
-            # Match mutuo: notifica a ambos
             await update.message.reply_text(
                 f"🎉 ¡Match mutuo con @{cand.username}! Podéis hablar por privado.",
                 reply_markup=main_keyboard()
@@ -235,13 +234,13 @@ async def match_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Volviendo al menú principal.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
-# — Cancelar —
+# Cancelar
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("Operación cancelada.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
-# — Lanzamiento —
+# Lanzamiento
 if __name__ == "__main__":
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 
@@ -256,25 +255,4 @@ if __name__ == "__main__":
             PROFILE_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, profile_menu)],
             PHOTO:        [MessageHandler(filters.PHOTO, perfil_photo)],
             DESC:         [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_description)],
-            INSTA:        [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_instagram)],
-            GENDER:       [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_gender)],
-            COUNTRY:      [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_country)],
-            CITY:         [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_city)],
-        },
-        fallbacks=[CommandHandler("cancelar", cancel)],
-    )
-    app.add_handler(perfil_conv)
-
-    # Emparejar
-    match_conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^👥 Emparejar$"), match_start)],
-        states={MATCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, match_choice)]},
-        fallbacks=[CommandHandler("cancelar", cancel)],
-    )
-    app.add_handler(match_conv)
-
-    # Fallback general
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    logger.info("🤖 Bot iniciado con foto y like flow")
-    app.run_polling(drop_pending_updates=True)
+            INSTA:
