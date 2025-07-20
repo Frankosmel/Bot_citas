@@ -1,11 +1,19 @@
 # main.py
 
 import logging
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
     ContextTypes,
     ConversationHandler,
@@ -26,7 +34,7 @@ db = Database(config.DB_URL)
 PROFILE_MENU, PHOTO, DESC, INSTA, GENDER, COUNTRY, CITY = range(7)
 SEARCH = 0
 
-# Keyboards
+# Reply keyboards
 def main_keyboard() -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton("🔍 Buscar Perfiles"), KeyboardButton("🔔 Promociones")],
@@ -52,6 +60,21 @@ def search_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton("❤️ Me gusta"), KeyboardButton("🚯 No me gusta")],
         [KeyboardButton("✋ Salir Búsqueda")]
     ], resize_keyboard=True)
+
+# Inline keyboard for notification
+def notify_inline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("❤️ Corresponder", callback_data="notify_correspond"),
+            InlineKeyboardButton("🚯 Rechazar",     callback_data="notify_reject"),
+            InlineKeyboardButton("✋ Salir",         callback_data="notify_exit"),
+        ]
+    ])
+
+def contact_inline_keyboard(username: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📩 Contactar", url=f"https://t.me/{username}")]
+    ])
 
 # /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -229,19 +252,13 @@ async def search_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=cand.id,
             photo=cand.photo_file_id,
             caption=(
-                f"👤 @{update.effective_user.username} le gustó tu perfil\n\n"
-                f"👤 {update.effective_user.full_name}\n\n"
-                "❤️   🚯   ✋"
-            )
+                f"👤 {cand.fullname}\n"
+                f"📍 {cand.country}, {cand.city}\n\n"
+                f"{cand.description}"
+            ),
+            reply_markup=notify_inline_keyboard()
         )
-        # check mutual
-        mutual = db.record_like(cand.id, uid)
-        if mutual:
-            await update.message.reply_text(
-                f"🎉 ¡Match mutuo con @{cand.username}! Ya podéis contactar: @{update.effective_user.username}",
-                reply_markup=main_keyboard()
-            )
-            return ConversationHandler.END
+        # advance to next in search
         context.user_data['idx'] += 1
         return await show_next(update, context)
 
@@ -253,8 +270,31 @@ async def search_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Búsqueda detenida.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    await update.message.reply_text("Volviendo al menú principal.", reply_markup=main_keyboard())
     return ConversationHandler.END
+
+# Notification callbacks
+async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    data = q.data
+    uid = q.from_user.id
+    # The candidate who liked this user was the previous 'cand' in context.job?
+    # We'll retrieve it from the last sent photo's caption metadata:
+    # Instead, store the liker in context.user_data on search_choice:
+    # as context.user_data['last_notifier']
+    notifier = context.user_data.get('last_notifier')
+    if not notifier:
+        return await q.edit_message_text("Error interno.", reply_markup=main_keyboard())
+
+    if data == "notify_correspond":
+        # Replace with contact button
+        await q.edit_message_caption(
+            caption=q.message.caption,
+            reply_markup=contact_inline_keyboard(notifier.username)
+        )
+    else:
+        # reject or exit
+        await q.edit_message_text("Notificación cerrada.", reply_markup=main_keyboard())
 
 # Cancel flow
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -262,7 +302,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Operación cancelada.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
-# Application setup
 if __name__ == "__main__":
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 
@@ -270,6 +309,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
 
+    # Profile conversation
     perfil_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^📄 Perfil$"), handle_message)],
         states={
@@ -285,6 +325,7 @@ if __name__ == "__main__":
     )
     app.add_handler(perfil_conv)
 
+    # Search conversation
     search_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🔍 Buscar Perfiles$"), search_start)],
         states={SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_choice)]},
@@ -292,6 +333,10 @@ if __name__ == "__main__":
     )
     app.add_handler(search_conv)
 
+    # Notification inline callbacks
+    app.add_handler(CallbackQueryHandler(notify_callback, pattern="^notify_"))
+
+    # General fallback
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("🤖 Bot iniciado correctamente")
