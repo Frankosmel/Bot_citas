@@ -17,7 +17,7 @@ from telegram.ext import (
 import config
 from database import Database
 
-# Estados
+# Estados del ConversationHandler
 (
     MENU,
     PROFILE_MENU,
@@ -25,19 +25,19 @@ from database import Database
     SEARCH,
 ) = range(10)
 
-# Logging
+# Configuración de logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# ——— Teclados ———
+# ===== Teclados =====
 
 def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup([
         ["👤 Mi Perfil", "🔍 Buscar gente cerca"],
-        ["🔔 Promociones", "🛑 Salir"]
+        ["🔔 Promociones",   "🛑 Salir"]
     ], resize_keyboard=True)
 
 def profile_menu_keyboard(has_profile: bool) -> ReplyKeyboardMarkup:
@@ -71,26 +71,41 @@ def contact_inline_keyboard(user_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("📩 Contactar", url=f"tg://user?id={user_id}")
     ]])
 
-# ——— Handlers ———
+# ===== Handlers =====
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/start — Bienvenida detallada y ayuda."""
     db = context.bot_data["db"]
     user = update.effective_user
     db.register_user(user.id, user.full_name)
     await update.message.reply_text(
         "🎉 ¡Bienvenido a LeoMatch! 🎉\n\n"
+        "Este bot te permite:\n"
+        "1️⃣ Crear y gestionar tu perfil con foto, descripción, género, ubicación e Instagram.\n"
+        "2️⃣ Buscar perfiles de usuarios cercanos según tu ciudad y preferencias de género.\n"
+        "3️⃣ Dar ❤️ “Me interesa” o 🚫 “No es para mí” en cada perfil.\n"
+        "4️⃣ Si ambos se dan ❤️ mutuamente, recibirán un botón para contactar directamente.\n\n"
+        "🔹 Usa ‘Mi Perfil’ para crear/ver/editar o borrar tu perfil.\n"
+        "🔹 Usa ‘Buscar gente cerca’ para iniciar la búsqueda de posibles coincidencias.\n"
+        "🔹 Pulsa /help para ver esta guía en cualquier momento.\n\n"
         "Selecciona una opción:",
         reply_markup=main_keyboard()
     )
     return MENU
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/help — Mostrar guía breve."""
     await update.message.reply_text(
-        "Usa los botones para navegar.\n"
-        "/cancelar para volver al menú."
+        "🔹 Usa los botones bajo teclado para navegar:\n"
+        "   • 👤 Mi Perfil: gestiona tu perfil.\n"
+        "   • 🔍 Buscar gente cerca: explora y da like/dislike.\n"
+        "🔹 En búsqueda, usa botones inline para indicar interés.\n"
+        "🔹 Si hay match mutuo, recibirás un botón de contacto.\n"
+        "🔹 Envía /cancelar para volver al menú principal en cualquier momento."
     )
 
 async def menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manejo de opciones del menú principal."""
     text = update.message.text
     uid = update.effective_user.id
     db = context.bot_data["db"]
@@ -105,41 +120,44 @@ async def menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "🔔 Promociones":
         prem = db.is_premium(uid)
-        msg = "Para recibir promos hazte Premium 💎" if not prem else "No hay promos nuevas."
+        msg = "Para recibir promociones hazte Premium 💎" if not prem else "No hay promociones nuevas."
         await update.message.reply_text(msg, reply_markup=main_keyboard())
         return MENU
 
     if text == "🛑 Salir":
         db.unregister_user(uid)
-        await update.message.reply_text("👋 Has salido. Usa /start para volver.", reply_markup=main_keyboard())
+        await update.message.reply_text("👋 Te has dado de baja. Usa /start para volver.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    await update.message.reply_text("❌ Opción no válida.", reply_markup=main_keyboard())
+    await update.message.reply_text("❌ Opción no válida. Usa los botones del menú.", reply_markup=main_keyboard())
     return MENU
 
-# — Gestión de perfil —
+# ----- Gestión de perfil -----
 
 async def profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manejo del submenú Perfil."""
     text = update.message.text
     uid = update.effective_user.id
     db = context.bot_data["db"]
 
+    # Crear o editar perfil
     if text in ("🆕 Crear mi perfil", "✏️ Editar mis datos"):
         await update.message.reply_text("📸 Por favor, envía tu foto de perfil.")
         return PHOTO
 
+    # Ver perfil
     if text == "👁️ Ver mi perfil":
         p = db.get_profile(uid)
         if not p or not p.photo_file_id:
             await update.message.reply_text(
-                "❌ Aún no tienes perfil. Usa Crear/Editar.",
+                "❌ No tienes perfil. Usa Crear/Editar para configurarlo.",
                 reply_markup=profile_menu_keyboard(False)
             )
         else:
             await update.message.reply_photo(
                 photo=p.photo_file_id,
                 caption=(
-                    f"👤 Nombre: {p.fullname}\n"
+                    f"👤 {p.fullname}\n"
                     f"🌎 País: {p.country}\n"
                     f"🏙️ Ciudad: {p.city}\n"
                     f"⚧️ Género: {p.gender}\n"
@@ -151,6 +169,7 @@ async def profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return PROFILE_MENU
 
+    # Borrar perfil
     if text == "❌ Borrar mi perfil":
         await update.message.reply_text("⚠️ Confirma borrado enviando Sí o No.")
         context.user_data["confirm_delete"] = True
@@ -162,75 +181,85 @@ async def profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🗑️ Perfil eliminado.", reply_markup=main_keyboard())
         else:
             await update.message.reply_text("✅ Eliminación cancelada.", reply_markup=profile_menu_keyboard(True))
-        context.user_data.pop("confirm_delete")
+        context.user_data.pop("confirm_delete", None)
         return PROFILE_MENU
 
+    # Volver
     if text == "🔙 Menú principal":
-        await update.message.reply_text("🔙 Volviendo al menú.", reply_markup=main_keyboard())
+        await update.message.reply_text("🔙 Volviendo al menú principal.", reply_markup=main_keyboard())
         return MENU
 
     await update.message.reply_text("❌ Opción inválida en Perfil.", reply_markup=profile_menu_keyboard(True))
     return PROFILE_MENU
 
-# — Crear/editar perfil —
+# ----- Crear / Editar perfil -----
 
 async def perfil_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe la foto y solicita descripción."""
     if not update.message.photo:
-        await update.message.reply_text("❗ Envía una foto válida.")
+        await update.message.reply_text("❗ Debes enviar una foto.")
         return PHOTO
     context.user_data['photo'] = update.message.photo[-1].file_id
-    await update.message.reply_text("📝 Ahora envía una breve descripción (una frase).")
+    await update.message.reply_text("📝 Ahora, envía una breve descripción (una frase).")
     return DESC
 
 async def perfil_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe la descripción y solicita Instagram."""
     context.user_data['description'] = update.message.text
-    await update.message.reply_text("🔗 Tu usuario de Instagram (sin @), o — si no tienes.")
+    await update.message.reply_text("🔗 Comparte tu usuario de Instagram (sin @), o envía — si no tienes.")
     return INSTA
 
 async def perfil_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe Instagram y solicita género."""
     context.user_data['instagram'] = update.message.text.strip() or ""
-    await update.message.reply_text("⚧️ Indica tu género (Hombre/Mujer/Otro).")
+    await update.message.reply_text("⚧️ Indica tu género (por ejemplo: Hombre, Mujer u Otro).")
     return GENDER
 
 async def perfil_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe género y solicita preferencia."""
     context.user_data['gender'] = update.message.text
-    await update.message.reply_text("🔎 ¿Qué género te interesa conocer?")
+    await update.message.reply_text("🔎 ¿Qué género te interesa conocer? (Hombre, Mujer u Otro).")
     return PREF_GENDER
 
 async def perfil_pref_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe preferencia de género y solicita país."""
     context.user_data['pref_gender'] = update.message.text
     await update.message.reply_text("🌎 Por favor, envía tu país de residencia.")
     return COUNTRY
 
 async def perfil_country(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe país y solicita ciudad."""
     context.user_data['country'] = update.message.text
     await update.message.reply_text("🏙️ Finalmente, ¿en qué ciudad vives?")
     return CITY
 
 async def perfil_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe ciudad, guarda el perfil completo y regresa."""
     uid = update.effective_user.id
     data = context.user_data
     db = context.bot_data["db"]
     db.save_profile(
         uid,
-        photo_file_id = data['photo'],
-        description   = data['description'],
-        instagram     = data['instagram'],
-        gender        = data['gender'],
-        pref_gender   = data['pref_gender'],
-        country       = data['country'],
-        city          = update.message.text
+        photo_file_id=data['photo'],
+        description=data['description'],
+        instagram=data['instagram'],
+        gender=data['gender'],
+        pref_gender=data['pref_gender'],
+        country=data['country'],
+        city=update.message.text
     )
     await update.message.reply_text(
-        "✅ Perfil guardado con éxito.\n👁️ Usa 'Ver mi perfil' para verlo.",
+        "✅ Tu perfil ha sido guardado correctamente.\n"
+        "👁️ Usa 'Ver mi perfil' para revisarlo.",
         reply_markup=main_keyboard()
     )
     context.user_data.clear()
     return MENU
 
-# — Búsqueda de perfiles —
+# ----- Búsqueda de perfiles -----
 
 async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inicia búsqueda cargando candidatos."""
     uid = update.effective_user.id
     db = context.bot_data["db"]
     context.user_data['candidates'] = db.get_potential_matches(uid)
@@ -241,6 +270,7 @@ async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await show_next(update, context)
 
 async def show_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra siguiente perfil con botones inline de interés."""
     idx = context.user_data['idx']
     cand = context.user_data['candidates'][idx]
     await update.message.reply_photo(
@@ -256,6 +286,7 @@ async def show_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SEARCH
 
 async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja Me interesa / No es para mí y guarda last_searcher."""
     q = update.callback_query
     await q.answer()
     db = context.bot_data["db"]
@@ -263,8 +294,11 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     idx = context.user_data['idx']
     cand = context.user_data['candidates'][idx]
 
+    # Guardamos quién inició el like para notificar más tarde
+    context.user_data['last_searcher'] = uid
+
     if q.data == "search_like":
-        # Enviar notificación a A con botones Me interesa/No es para mí
+        # Enviar notificación a A con botones inline de confirmación
         me = db.get_profile(uid)
         await context.bot.send_photo(
             chat_id=cand.id,
@@ -281,46 +315,45 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Avanzar al siguiente perfil
     context.user_data['idx'] += 1
     if context.user_data['idx'] >= len(context.user_data['candidates']):
-        # Editar último mensaje indicando fin
+        # Editar última foto indicando fin
         await q.edit_message_caption(
             caption=q.message.caption + "\n\n🚫 Se acabaron los perfiles.",
             reply_markup=None
         )
+        # Botón de volver
         await context.bot.send_message(
             chat_id=uid,
-            text="🔙 Pulsa Menú principal para volver.",
+            text="🔙 Pulsa Menú principal para regresar.",
             reply_markup=back_keyboard()
         )
         return MENU
 
-    # Borrar mensaje actual y mostrar siguiente
+    # Borrar mensaje anterior y mostrar siguiente
     await q.delete_message()
     return await show_next(update, context)
 
-# — Callback de notificaciones de like —
+# ----- Callback de notificación de match -----
 
 async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Procesa la confirmación de A y notifica a ambos."""
     q = update.callback_query
     await q.answer()
     db = context.bot_data["db"]
-    uid = q.from_user.id
-
-    # Identificamos a quién notificamos (el emisor original)
-    # Lo capturamos guardándolo en user_data en el momento de enviar notify.
-    notifier_id = context.user_data.get('last_searcher')
-    if not notifier_id:
+    A_id = q.from_user.id
+    B_id = context.user_data.get('last_searcher')
+    if not B_id:
         return
 
     if q.data == "notify_like":
-        # Edición de la notificación para A
+        # Editar notificación de A
         await q.edit_message_caption(
             caption=q.message.caption + "\n\n🎉 ¡Match mutuo!",
-            reply_markup=contact_inline_keyboard(notifier_id)
+            reply_markup=contact_inline_keyboard(B_id)
         )
         # Notificar a B
-        other = db.get_profile(uid)
+        other = db.get_profile(A_id)
         await context.bot.send_photo(
-            chat_id=notifier_id,
+            chat_id=B_id,
             photo=other.photo_file_id,
             caption=(
                 f"🎉 ¡Match mutuo con @{other.id}!\n"
@@ -329,19 +362,19 @@ async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🏙️ Ciudad: {other.city}\n\n"
                 f"📝 {other.description}"
             ),
-            reply_markup=contact_inline_keyboard(uid)
+            reply_markup=contact_inline_keyboard(A_id)
         )
     else:
-        # Rechazo: cerramos notificación
+        # Rechazo de A
         await q.edit_message_text("❌ Notificación cerrada.", reply_markup=None)
 
-# — Cancelar ——
+# ----- Cancelar -----
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Operación cancelada.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
-# ——— Configuración y arranque ———
+# ===== Configuración y arranque =====
 
 def main():
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
