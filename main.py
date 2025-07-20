@@ -7,7 +7,6 @@ from telegram import (
     KeyboardButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InputMediaPhoto,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -30,206 +29,192 @@ logger = logging.getLogger(__name__)
 
 db = Database(config.DB_URL)
 
-# Conversation states
-PROFILE_MENU, PHOTO, DESC, INSTA, GENDER, COUNTRY, CITY = range(7)
+# States
+PROFILE_MENU, PHOTO, DESC, INSTA, GENDER, PREF_GENDER, COUNTRY, CITY = range(8)
 SEARCH = 0
 
-# Reply keyboards
-def main_keyboard() -> ReplyKeyboardMarkup:
-    buttons = [
-        [KeyboardButton("🔍 Buscar Perfiles"), KeyboardButton("🔔 Promociones")],
-        [KeyboardButton("📄 Perfil"),           KeyboardButton("🛑 Salir")],
-    ]
-    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
-
-def profile_menu_keyboard(has_profile: bool) -> ReplyKeyboardMarkup:
-    buttons = []
-    if not has_profile:
-        buttons.append([KeyboardButton("🆕 Crear Perfil")])
-    else:
-        buttons.extend([
-            [KeyboardButton("📋 Ver Mi Perfil")],
-            [KeyboardButton("✏️ Editar Perfil")],
-            [KeyboardButton("🗑️ Eliminar Perfil")],
-        ])
-    buttons.append([KeyboardButton("🏠 Volver")])
-    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
-
-def search_keyboard() -> ReplyKeyboardMarkup:
+# Keyboards
+def main_keyboard():
+    users = len(db.get_all_user_ids())
     return ReplyKeyboardMarkup([
-        [KeyboardButton("❤️ Me gusta"), KeyboardButton("🚯 No me gusta")],
-        [KeyboardButton("✋ Salir Búsqueda")]
+        [f"📊 Usuarios: {users}"],
+        ["🔍 Buscar Perfiles", "🔔 Promociones"],
+        ["📄 Perfil",           "🛑 Salir"],
     ], resize_keyboard=True)
 
-# Inline keyboard for notification
-def notify_inline_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("❤️ Corresponder", callback_data="notify_correspond"),
-            InlineKeyboardButton("🚯 Rechazar",     callback_data="notify_reject"),
-            InlineKeyboardButton("✋ Salir",         callback_data="notify_exit"),
+def profile_menu_keyboard(has_profile):
+    kb = []
+    if not has_profile:
+        kb.append(["🆕 Crear Perfil"])
+    else:
+        kb += [
+            ["📋 Ver Mi Perfil"],
+            ["✏️ Editar Perfil"],
+            ["🗑️ Eliminar Perfil"],
         ]
+    kb.append(["🏠 Volver"])
+    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
+
+def search_keyboard():
+    return ReplyKeyboardMarkup([
+        ["❤️ Me gusta", "🚯 No me gusta"],
+        ["✋ Salir Búsqueda"]
+    ], resize_keyboard=True)
+
+def notify_inline():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("❤️ Me gusta", callback_data="notify_like"),
+         InlineKeyboardButton("🚯 No me gusta", callback_data="notify_dislike")]
     ])
 
-def contact_inline_keyboard(username: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📩 Contactar", url=f"https://t.me/{username}")]
-    ])
+def contact_inline(username):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📩 Contactar", url=f"https://t.me/{username}")
+    ]])
 
 # /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    db.register_user(user.id, user.full_name)
-    count = len(db.get_all_user_ids())
+    u = update.effective_user
+    db.register_user(u.id, u.full_name)
     await update.message.reply_text(
-        "🎉 ¡Bienvenido a LeoMatch! 🎉\n"
-        "Conecta con gente nueva.\n\n"
-        f"📊 Usuarios registrados: {count}\n\n"
-        f"Hola, {user.first_name}! Elige una opción:",
+        "🎉 ¡Bienvenido a LeoMatch! 🎉\nConecta con gente cercana a ti.\n\n"
+        f"📊 Usuarios registrados: {len(db.get_all_user_ids())}\n"
+        f"Hola, {u.first_name}! Elige:",
         reply_markup=main_keyboard()
     )
 
 # /help
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Usa los botones bajo teclado para navegar.\n"
-        "Envía /cancelar para salir de cualquier flujo."
-    )
+async def help_command(update, context):
+    await update.message.reply_text("Usa botones para navegar. /cancelar para volver.")
 
-# Fallback to main menu
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+# Main fallback
+async def handle_message(update, context):
+    t = update.message.text
     uid = update.effective_user.id
 
-    if text == "🔍 Buscar Perfiles":
+    if t == "🔍 Buscar Perfiles":
         return await search_start(update, context)
 
-    if text == "🔔 Promociones":
-        is_prem = db.is_premium(uid)
+    if t == "🔔 Promociones":
+        prem = db.is_premium(uid)
         await update.message.reply_text(
-            "Para recibir promos hazte Premium 💎" if not is_prem else "No hay promos nuevas 🤝",
+            "Hazte Premium 💎" if not prem else "No hay promos.",
             reply_markup=main_keyboard()
         )
         return
 
-    if text == "📄 Perfil":
+    if t == "📄 Perfil":
         has = db.has_profile(uid)
-        await update.message.reply_text(
-            "🖊️ Gestión de Perfil:",
-            reply_markup=profile_menu_keyboard(has)
-        )
+        await update.message.reply_text("Perfil:", reply_markup=profile_menu_keyboard(has))
         return PROFILE_MENU
 
-    if text == "🛑 Salir":
+    if t == "🛑 Salir":
         db.unregister_user(uid)
-        await update.message.reply_text(
-            "Has salido. Usa /start para volver. 👋",
-            reply_markup=main_keyboard()
-        )
+        await update.message.reply_text("Salida ok. /start para vuelta.", reply_markup=main_keyboard())
         return
 
-    await update.message.reply_text(
-        "Opción no válida. Usa los botones.",
-        reply_markup=main_keyboard()
-    )
+    await update.message.reply_text("Elige opción.", reply_markup=main_keyboard())
 
-# Profile submenu handler
-async def profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+# Profile submenu
+async def profile_menu(update, context):
+    t = update.message.text
     uid = update.effective_user.id
 
-    if text in ("🆕 Crear Perfil", "✏️ Editar Perfil"):
-        await update.message.reply_text("📷 Por favor, envía tu foto de perfil:")
+    if t in ("🆕 Crear Perfil", "✏️ Editar Perfil"):
+        await update.message.reply_text("📷 Envía foto:")
         return PHOTO
 
-    if text == "📋 Ver Mi Perfil":
+    if t == "📋 Ver Mi Perfil":
         p = db.get_profile(uid)
         if not p or not p.photo_file_id:
-            await update.message.reply_text("No tienes perfil. Crea uno primero.", reply_markup=main_keyboard())
+            await update.message.reply_text("Sin perfil.", reply_markup=main_keyboard())
         else:
             await update.message.reply_photo(
-                photo=p.photo_file_id,
+                p.photo_file_id,
                 caption=(
                     f"👤 {p.fullname}\n"
                     f"📍 {p.country}, {p.city}\n"
-                    f"📸 instagram.com/{p.instagram}\n\n"
+                    f"📸 insta.com/{p.instagram}\n\n"
                     f"{p.description}"
                 ),
                 reply_markup=main_keyboard()
             )
         return ConversationHandler.END
 
-    if text == "🗑️ Eliminar Perfil":
+    if t == "🗑️ Eliminar Perfil":
         db.delete_profile(uid)
-        await update.message.reply_text("✅ Perfil eliminado.", reply_markup=main_keyboard())
+        await update.message.reply_text("Perfil borrado.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    if text == "🏠 Volver":
-        await update.message.reply_text("Menú principal:", reply_markup=main_keyboard())
+    if t == "🏠 Volver":
+        await update.message.reply_text("Menú:", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    await update.message.reply_text("Opción inválida en Perfil.", reply_markup=main_keyboard())
+    await update.message.reply_text("Opción invalida.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
-# Profile creation/edit flow
-async def perfil_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Profile flow
+async def perfil_photo(update, context):
     if not update.message.photo:
-        await update.message.reply_text("Envía una foto, por favor.")
+        await update.message.reply_text("Foto pls.")
         return PHOTO
     context.user_data['photo'] = update.message.photo[-1].file_id
-    await update.message.reply_text("📝 Ahora envía una descripción breve:")
+    await update.message.reply_text("📝 Descripción:")
     return DESC
 
-async def perfil_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def perfil_description(update, context):
     context.user_data['description'] = update.message.text
-    await update.message.reply_text("📸 Tu usuario de Instagram (sin @):")
+    await update.message.reply_text("📸 Instagram (sin @):")
     return INSTA
 
-async def perfil_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def perfil_instagram(update, context):
     context.user_data['instagram'] = update.message.text
-    await update.message.reply_text("👤 Tu género (Masculino/Femenino/Otro):")
+    await update.message.reply_text("👤 Tu género:")
     return GENDER
 
-async def perfil_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def perfil_gender(update, context):
     context.user_data['gender'] = update.message.text
-    await update.message.reply_text("🌍 ¿En qué país vives?")
+    await update.message.reply_text("👀 ¿Qué género buscas?")
+    return PREF_GENDER
+
+async def perfil_pref_gender(update, context):
+    context.user_data['pref_gender'] = update.message.text
+    await update.message.reply_text("🌍 País:")
     return COUNTRY
 
-async def perfil_country(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def perfil_country(update, context):
     context.user_data['country'] = update.message.text
-    await update.message.reply_text("🏙️ ¿Y ciudad o provincia?")
+    await update.message.reply_text("🏙️ Ciudad:")
     return CITY
 
-async def perfil_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def perfil_city(update, context):
     uid = update.effective_user.id
+    u = context.user_data
     db.save_profile(
         uid,
-        photo_file_id=context.user_data['photo'],
-        description=context.user_data['description'],
-        instagram=context.user_data['instagram'],
-        gender=context.user_data['gender'],
-        country=context.user_data['country'],
-        city=update.message.text
+        u['photo'], u['description'], u['instagram'],
+        u['gender'], u['pref_gender'],
+        u['country'], u['city'] if 'city' in u else update.message.text
     )
-    await update.message.reply_text("✅ Perfil guardado correctamente.", reply_markup=main_keyboard())
+    await update.message.reply_text("Perfil guardado ✅", reply_markup=main_keyboard())
     context.user_data.clear()
     return ConversationHandler.END
 
-# Search/match flow
-async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Search flow
+async def search_start(update, context):
     uid = update.effective_user.id
     context.user_data['candidates'] = db.get_potential_matches(uid)
     context.user_data['idx'] = 0
     if not context.user_data['candidates']:
-        await update.message.reply_text("No hay perfiles cercanos.", reply_markup=main_keyboard())
+        await update.message.reply_text("No hay perfiles.", reply_markup=main_keyboard())
         return ConversationHandler.END
     return await show_next(update, context)
 
-async def show_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_next(update, context):
     idx = context.user_data['idx']
     cand = context.user_data['candidates'][idx]
     await update.message.reply_photo(
-        photo=cand.photo_file_id,
+        cand.photo_file_id,
         caption=(
             f"👤 {cand.fullname}\n"
             f"📍 {cand.country}, {cand.city}\n\n"
@@ -239,77 +224,79 @@ async def show_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return SEARCH
 
-async def search_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+async def search_choice(update, context):
+    t = update.message.text
     uid = update.effective_user.id
     idx = context.user_data['idx']
     cand = context.user_data['candidates'][idx]
 
-    if text == "❤️ Me gusta":
+    if t == "❤️ Me gusta":
         db.record_like(uid, cand.id)
-        # notify owner
+        # notificamos a A con TU perfil y botones
+        u = update.effective_user
         await context.bot.send_photo(
             chat_id=cand.id,
-            photo=cand.photo_file_id,
+            photo=u.user_data['photo'],
             caption=(
-                f"👤 {cand.fullname}\n"
-                f"📍 {cand.country}, {cand.city}\n\n"
-                f"{cand.description}"
+                f"👤 {u.full_name}\n"
+                f"📍 {u.location if hasattr(u,'location') else ''}\n\n"
+                f"{u.user_data['description']}"
             ),
-            reply_markup=notify_inline_keyboard()
+            reply_markup=notify_inline()
         )
-        # advance to next in search
+        # guardamos A para el callback
+        context.user_data['notifier'] = u
+
+    if t in ("❤️ Me gusta", "🚯 No me gusta"):
         context.user_data['idx'] += 1
+        if context.user_data['idx'] >= len(context.user_data['candidates']):
+            await update.message.reply_text("No hay más perfiles.", reply_markup=main_keyboard())
+            return ConversationHandler.END
         return await show_next(update, context)
 
-    if text == "🚯 No me gusta":
-        context.user_data['idx'] += 1
-        return await show_next(update, context)
-
-    if text == "✋ Salir Búsqueda":
+    if t == "✋ Salir Búsqueda":
         await update.message.reply_text("Búsqueda detenida.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
     return ConversationHandler.END
 
-# Notification callbacks
-async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Notification callback
+async def notify_callback(update, context):
     q = update.callback_query
     await q.answer()
     data = q.data
-    uid = q.from_user.id
-    # The candidate who liked this user was the previous 'cand' in context.job?
-    # We'll retrieve it from the last sent photo's caption metadata:
-    # Instead, store the liker in context.user_data on search_choice:
-    # as context.user_data['last_notifier']
-    notifier = context.user_data.get('last_notifier')
+    notifier = context.user_data.get('notifier')
     if not notifier:
-        return await q.edit_message_text("Error interno.", reply_markup=main_keyboard())
-
-    if data == "notify_correspond":
-        # Replace with contact button
+        return
+    if data == "notify_like":
+        # match mutuo: ambos reciben botón contactar
+        u = update.effective_user
         await q.edit_message_caption(
-            caption=q.message.caption,
-            reply_markup=contact_inline_keyboard(notifier.username)
+            caption=q.message.caption + f"\n\n🎉 ¡Match mutuo! @{u.username}",
+            reply_markup=contact_inline(notifier.username)
+        )
+        await context.bot.send_photo(
+            chat_id=notifier.id,
+            photo=q.message.photo.file_id,
+            caption=q.message.caption + f"\n\n🎉 ¡Match mutuo! @{u.username}",
+            reply_markup=contact_inline(u.username)
         )
     else:
-        # reject or exit
+        # reject
         await q.edit_message_text("Notificación cerrada.", reply_markup=main_keyboard())
 
-# Cancel flow
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Cancel
+async def cancel(update, context):
     context.user_data.clear()
-    await update.message.reply_text("Operación cancelada.", reply_markup=main_keyboard())
+    await update.message.reply_text("Cancelado.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 
-    # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
 
-    # Profile conversation
     perfil_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^📄 Perfil$"), handle_message)],
         states={
@@ -318,6 +305,7 @@ if __name__ == "__main__":
             DESC:         [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_description)],
             INSTA:        [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_instagram)],
             GENDER:       [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_gender)],
+            PREF_GENDER:  [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_pref_gender)],
             COUNTRY:      [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_country)],
             CITY:         [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_city)],
         },
@@ -325,7 +313,6 @@ if __name__ == "__main__":
     )
     app.add_handler(perfil_conv)
 
-    # Search conversation
     search_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🔍 Buscar Perfiles$"), search_start)],
         states={SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_choice)]},
@@ -333,11 +320,9 @@ if __name__ == "__main__":
     )
     app.add_handler(search_conv)
 
-    # Notification inline callbacks
     app.add_handler(CallbackQueryHandler(notify_callback, pattern="^notify_"))
 
-    # General fallback
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("🤖 Bot iniciado correctamente")
+    logger.info("🤖 Bot iniciado con preferencias y match mutuo")
     app.run_polling(drop_pending_updates=True)
