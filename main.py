@@ -224,14 +224,13 @@ async def search_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "❤️ Me gusta":
         db.record_like(uid, cand.id)
-        # notify owner with profile data and buttons
+        # notify owner
         await context.bot.send_photo(
             chat_id=cand.id,
             photo=cand.photo_file_id,
             caption=(
                 f"👤 @{update.effective_user.username} le gustó tu perfil\n\n"
-                f"👤 {update.effective_user.full_name}\n"
-                f"📍 [país/provincia no disponible]\n\n"
+                f"👤 {update.effective_user.full_name}\n\n"
                 "❤️   🚯   ✋"
             )
         )
@@ -239,11 +238,10 @@ async def search_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mutual = db.record_like(cand.id, uid)
         if mutual:
             await update.message.reply_text(
-                f"🎉 ¡Match mutuo con @{cand.username}! Ahora podéis contactar: @{update.effective_user.username}",
+                f"🎉 ¡Match mutuo con @{cand.username}! Ya podéis contactar: @{update.effective_user.username}",
                 reply_markup=main_keyboard()
             )
             return ConversationHandler.END
-        # else continue
         context.user_data['idx'] += 1
         return await show_next(update, context)
 
@@ -255,17 +253,16 @@ async def search_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Búsqueda detenida.", reply_markup=main_keyboard())
         return ConversationHandler.END
 
-    # fallback
     await update.message.reply_text("Volviendo al menú principal.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
 # Cancel flow
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.
-context.reply_text("Operación cancelada.", reply_markup=main_keyboard())
+    await update.message.reply_text("Operación cancelada.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
+# Application setup
 if __name__ == "__main__":
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 
