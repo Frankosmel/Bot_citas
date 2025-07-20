@@ -22,6 +22,7 @@ class User(Base):
     description   = Column(String, default="")
     instagram     = Column(String, default="")
     gender        = Column(String, default="")
+    pref_gender   = Column(String, default="")  # NUEVO: preferencia de género
     country       = Column(String, default="")
     city          = Column(String, default="")
 
@@ -45,7 +46,6 @@ class Like(Base):
     sender = relationship("User", foreign_keys=[user_id], back_populates="likes_sent")
     target = relationship("User", foreign_keys=[target_id], back_populates="likes_received")
 
-# Create engine and tables if they don't yet exist
 engine = create_engine(config.DB_URL, echo=False)
 Session = sessionmaker(bind=engine)
 Base.metadata.create_all(engine)
@@ -55,103 +55,104 @@ class Database:
         self.engine = create_engine(db_url, echo=False)
         self.Session = sessionmaker(bind=self.engine)
 
-    # User registration
     def register_user(self, user_id, fullname):
-        session = self.Session()
-        if not session.get(User, user_id):
-            session.add(User(id=user_id, fullname=fullname))
-            session.commit()
-        session.close()
+        s = self.Session()
+        if not s.get(User, user_id):
+            s.add(User(id=user_id, fullname=fullname))
+            s.commit()
+        s.close()
 
     def unregister_user(self, user_id):
-        session = self.Session()
-        user = session.get(User, user_id)
-        if user:
-            session.delete(user)
-            session.commit()
-        session.close()
+        s = self.Session()
+        u = s.get(User, user_id)
+        if u:
+            s.delete(u)
+            s.commit()
+        s.close()
 
-    # Premium status
     def set_premium(self, user_id):
-        session = self.Session()
-        user = session.get(User, user_id)
-        if user and not user.is_premium:
-            user.is_premium = True
-            session.commit()
-        session.close()
+        s = self.Session()
+        u = s.get(User, user_id)
+        if u and not u.is_premium:
+            u.is_premium = True
+            s.commit()
+        s.close()
 
     def is_premium(self, user_id):
-        session = self.Session()
-        user = session.get(User, user_id)
-        result = bool(user and user.is_premium)
-        session.close()
-        return result
+        s = self.Session()
+        u = s.get(User, user_id)
+        res = bool(u and u.is_premium)
+        s.close()
+        return res
 
-    # Profile methods
     def has_profile(self, user_id):
-        session = self.Session()
-        user = session.get(User, user_id)
-        result = bool(user and user.photo_file_id)
-        session.close()
-        return result
+        s = self.Session()
+        u = s.get(User, user_id)
+        res = bool(u and u.photo_file_id)
+        s.close()
+        return res
 
-    def save_profile(self, user_id, photo_file_id, description, instagram, gender, country, city):
-        session = self.Session()
-        user = session.get(User, user_id)
-        if user:
-            user.photo_file_id = photo_file_id
-            user.description   = description
-            user.instagram     = instagram
-            user.gender        = gender
-            user.country       = country
-            user.city          = city
-            session.commit()
-        session.close()
+    def save_profile(self, user_id, photo_file_id, description, instagram, gender, pref_gender, country, city):
+        s = self.Session()
+        u = s.get(User, user_id)
+        if u:
+            u.photo_file_id = photo_file_id
+            u.description   = description
+            u.instagram     = instagram
+            u.gender        = gender
+            u.pref_gender   = pref_gender
+            u.country       = country
+            u.city          = city
+            s.commit()
+        s.close()
 
     def get_profile(self, user_id):
-        session = self.Session()
-        user = session.get(User, user_id)
-        session.close()
-        return user
+        s = self.Session()
+        u = s.get(User, user_id)
+        s.close()
+        return u
 
     def delete_profile(self, user_id):
-        session = self.Session()
-        user = session.get(User, user_id)
-        if user:
-            user.photo_file_id = ""
-            user.description   = ""
-            user.instagram     = ""
-            user.gender        = ""
-            user.country       = ""
-            user.city          = ""
-            session.commit()
-        session.close()
+        s = self.Session()
+        u = s.get(User, user_id)
+        if u:
+            u.photo_file_id = ""
+            u.description   = ""
+            u.instagram     = ""
+            u.gender        = ""
+            u.pref_gender   = ""
+            u.country       = ""
+            u.city          = ""
+            s.commit()
+        s.close()
 
-    # Matching and likes
     def get_potential_matches(self, user_id):
-        session = self.Session()
-        users = session.query(User).filter(
+        s = self.Session()
+        me = s.get(User, user_id)
+        # filtro por preferencia mutua y ubicación
+        users = s.query(User).filter(
             User.id != user_id,
-            User.photo_file_id != ""
+            User.photo_file_id != "",
+            User.gender == me.pref_gender,
+            me.gender == User.pref_gender,
+            User.country == me.country,
+            User.city == me.city,
         ).all()
-        session.close()
+        s.close()
         return users
 
     def record_like(self, user_id, target_id):
-        session = self.Session()
-        # Avoid duplicates
-        existing = session.query(Like).filter_by(user_id=user_id, target_id=target_id).first()
-        if not existing:
-            session.add(Like(user_id=user_id, target_id=target_id))
-            session.commit()
-        # Check mutual like
-        mutual = session.query(Like).filter_by(user_id=target_id, target_id=user_id).first()
-        session.close()
+        s = self.Session()
+        exists = s.query(Like).filter_by(user_id=user_id, target_id=target_id).first()
+        if not exists:
+            s.add(Like(user_id=user_id, target_id=target_id))
+            s.commit()
+        mutual = s.query(Like).filter_by(user_id=target_id, target_id=user_id).first()
+        s.close()
         return bool(mutual)
 
-    # Utility
     def get_all_user_ids(self):
-        session = self.Session()
-        ids = [u.id for u in session.query(User).all()]
-        session.close()
+        s = self.Session()
+        ids = [u.id for u in s.query(User).all()]
+        s.close()
         return ids
