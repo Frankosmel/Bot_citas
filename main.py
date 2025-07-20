@@ -70,7 +70,7 @@ def contact_inline(user_id: int) -> InlineKeyboardMarkup:
 
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/start — Bienvenida detallada y ayuda."""
+    """/start — Bienvenida detallada."""
     db = context.bot_data["db"]
     user = update.effective_user
     db.register_user(user.id, user.full_name)
@@ -78,11 +78,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎉 ¡Bienvenid@ al bot *Citas y Amigos*! 🎉\n\n"
         "Este bot te permite:\n"
         "1️⃣ Crear y gestionar tu perfil con foto, descripción, género y ubicación.\n"
-        "2️⃣ Buscar perfiles de usuarios cercanos según tu ciudad y preferencias de género.\n"
+        "2️⃣ Buscar perfiles de usuarios cercanos según tu ciudad y preferencias.\n"
         "3️⃣ Dar ❤️ “Me interesa” o 🚫 “No es para mí” en cada perfil.\n"
-        "4️⃣ Si ambos se dan ❤️ mutuamente, recibirán un botón para contactar directamente.\n\n"
+        "4️⃣ Si ambos se dan ❤️ mutuamente, recibirán un botón para contactar.\n\n"
         "🔹 Usa ‘Mi Perfil’ para crear/ver/editar o borrar tu perfil.\n"
-        "🔹 Usa ‘Buscar gente cerca’ para iniciar la búsqueda de posibles coincidencias.\n"
+        "🔹 Usa ‘Buscar gente cerca’ para explorar perfiles.\n"
         "🔹 Pulsa /help para ver esta guía en cualquier momento.\n\n"
         "Selecciona una opción:",
         reply_markup=main_kb(),
@@ -120,7 +120,10 @@ async def menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "🛑 Salir":
         db.unregister_user(uid)
-        await update.message.reply_text("👋 Te has dado de baja. Usa /start para regresar.", reply_markup=main_kb())
+        await update.message.reply_text(
+            "👋 Te has dado de baja. Usa /start para regresar.",
+            reply_markup=main_kb()
+        )
         return ConversationHandler.END
 
     await update.message.reply_text("❌ Opción no válida. Usa los botones del menú.", reply_markup=main_kb())
@@ -272,16 +275,19 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if q.data == "search_like":
         me = db.get_profile(uid)
+        # Notificación a Y: "A X le ha gustado tu perfil"
         await context.bot.send_photo(
             chat_id=cand.id,
             photo=me.photo_file_id,
             caption=(
-                f"👤 {me.fullname}\n"
+                f"🎉 ¡A *{me.fullname}* le ha gustado tu perfil!\n\n"
+                f"👤 Nombre: {me.fullname}\n"
                 f"🌎 País: {me.country}\n"
                 f"🏙️ Ciudad: {me.city}\n\n"
                 f"📝 {me.description}"
             ),
-            reply_markup=notify_inline_kb(uid)
+            reply_markup=notify_inline_kb(uid),
+            parse_mode="Markdown"
         )
 
     context.user_data['idx'] += 1
@@ -320,8 +326,8 @@ async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption=(
                 f"🎉 ¡Match mutuo con @{other.id}!\n"
                 f"👤 {other.fullname}\n"
-                f"🌎 {other.country}\n"
-                f"🏙️ {other.city}\n\n"
+                f"🌎 País: {other.country}\n"
+                f"🏙️ Ciudad: {other.city}\n\n"
                 f"📝 {other.description}"
             ),
             reply_markup=contact_inline(receiver_id)
