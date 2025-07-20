@@ -27,159 +27,127 @@ logger = logging.getLogger(__name__)
 db = Database(config.DB_URL)
 
 # Conversation states
-DESC, INSTA, GENDER, COUNTRY, CITY = range(5)
+# Perfil menú
+PROFILE_CHOICE = 0
+# Crear/editar perfil
+DESC, INSTA, GENDER, COUNTRY, CITY = range(1, 6)
+# Emparejar
 MATCH = 0
 
 # Keyboards
 def main_keyboard() -> ReplyKeyboardMarkup:
-    buttons = [
-        [KeyboardButton("👥 Emparejar"), KeyboardButton("🔔 Promociones")],
-        [KeyboardButton("📄 Perfil"),     KeyboardButton("🛑 Salir")],
-    ]
+    return ReplyKeyboardMarkup([
+        ["👥 Emparejar", "🔔 Promociones"],
+        ["📄 Perfil",    "🛑 Salir"]
+    ], resize_keyboard=True)
+
+def profile_menu_keyboard(has_profile: bool) -> ReplyKeyboardMarkup:
+    buttons = []
+    if not has_profile:
+        buttons.append([KeyboardButton("🆕 Crear Perfil")])
+    else:
+        buttons.append([KeyboardButton("✏️ Editar Perfil")])
+        buttons.append([KeyboardButton("🗑️ Eliminar Perfil")])
+    buttons.append([KeyboardButton("🏠 Volver")])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def match_keyboard() -> ReplyKeyboardMarkup:
-    buttons = [
-        [KeyboardButton("👍 Me gusta"), KeyboardButton("➡️ Siguiente")],
-        [KeyboardButton("🏠 Menú")],
-    ]
-    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+    return ReplyKeyboardMarkup([
+        ["❤️ Me gusta", "🚫 No me gusta"],
+        ["🏠 Menú"]
+    ], resize_keyboard=True)
 
-# —————————————————————
-# Handlers de comandos
-# —————————————————————
-
+# — Handlers /start y /help
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.register_user(user.id, user.full_name)
-    text = (
+    await update.message.reply_text(
         "Leo: ¡Ligar. Citas y amigos! 💕\n"
         "Ayuda 👉 @leomatchbot_help\n"
         "Compra publicidad 👉 @ADinsidebot\n\n"
         f"¡Hola, {user.first_name}! 🤖\n"
-        "Bienvenido a LeoMatch Bot. Elige una opción:"
+        "Elige una opción:",
+        reply_markup=main_keyboard()
     )
-    await update.message.reply_text(text, reply_markup=main_keyboard())
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Usa los botones del teclado para navegar.\n"
-        "Para cancelar un flujo, envía /cancelar."
+        "Usa los botones para navegar. /cancelar para salir de un flujo."
     )
 
-# —————————————————————
-# Handler general de texto (fallback al menú principal)
-# —————————————————————
-
+# — Fallback teclado principal
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    # Emparejar
     if text == "👥 Emparejar":
         return await match_start(update, context)
 
-    # Promociones
     if text == "🔔 Promociones":
         is_prem = db.is_premium(user_id)
-        reply = (
-            "Para recibir promociones, hazte Premium 💎"
-            if not is_prem else "No hay promociones nuevas 🤝"
+        await update.message.reply_text(
+            "Para recibir promos hazte Premium 💎" if not is_prem else "No hay promos nuevas 🤝",
+            reply_markup=main_keyboard()
         )
-        await update.message.reply_text(reply, reply_markup=main_keyboard())
         return
 
-    # Perfil
     if text == "📄 Perfil":
-        return await perfil_start(update, context)
+        has = db.has_profile(user_id)
+        await update.message.reply_text(
+            "Gestión de Perfil:",
+            reply_markup=profile_menu_keyboard(has)
+        )
+        return PROFILE_CHOICE
 
-    # Salir
     if text == "🛑 Salir":
         db.unregister_user(user_id)
         await update.message.reply_text("Has salido. Usa /start para volver. 👋",
                                         reply_markup=main_keyboard())
         return
 
-    # Cualquier otro texto
-    await update.message.reply_text("Opción no válida. Usa los botones.",
-                                    reply_markup=main_keyboard())
+    # default
+    await update.message.reply_text("Opción no válida. Usa los botones.", reply_markup=main_keyboard())
 
-# —————————————————————
-# Flujo de Emparejar
-# —————————————————————
-
-async def match_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# — Perfil: menú principal
+async def profile_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
     user_id = update.effective_user.id
-    context.user_data['candidates'] = db.get_potential_matches(user_id)
-    context.user_data['idx'] = 0
-    if not context.user_data['candidates']:
+
+    if text == "🆕 Crear Perfil":
+        await update.message.reply_text("📝 Envíame una descripción corta de tu perfil:")
+        return DESC
+    if text == "✏️ Editar Perfil":
+        profile = db.get_profile(user_id)
         await update.message.reply_text(
-            "No hay usuarios cerca en este momento.",
-            reply_markup=main_keyboard()
+            f"Tu perfil actual:\n"
+            f"📝 {profile.description}\n"
+            f"📸 instagram.com/{profile.instagram}\n"
+            f"👤 {profile.gender}\n"
+            f"📍 {profile.city}, {profile.country}\n\n"
+            "¿Qué deseas editar? Envíame la nueva descripción:",
         )
+        return DESC
+    if text == "🗑️ Eliminar Perfil":
+        db.delete_profile(user_id)
+        await update.message.reply_text("✅ Perfil eliminado.\nVolviendo al menú principal.",
+                                        reply_markup=main_keyboard())
         return ConversationHandler.END
-    return await show_next_profile(update, context)
-
-async def show_next_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    idx = context.user_data['idx']
-    candidates = context.user_data['candidates']
-    if idx >= len(candidates):
-        await update.message.reply_text(
-            "Has llegado al final de la lista.",
-            reply_markup=main_keyboard()
-        )
+    if text == "🏠 Volver":
+        await update.message.reply_text("Menú principal:", reply_markup=main_keyboard())
         return ConversationHandler.END
-    user = candidates[idx]
-    text = (
-        f"👤 {user.fullname}\n"
-        f"📍 {user.city}, {user.country}\n"
-        f"Instagram: https://instagram.com/{user.instagram}\n\n"
-        "¿Te gusta este perfil?"
-    )
-    await update.message.reply_text(text, reply_markup=match_keyboard())
-    return MATCH
 
-async def match_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text
-    user_id = update.effective_user.id
-    idx = context.user_data['idx']
-    candidates = context.user_data['candidates']
-    current = candidates[idx]
-
-    if choice == "👍 Me gusta":
-        if db.record_like(user_id, current.id):
-            await update.message.reply_text(
-                "¡Es un match! Ahora podéis hablar por privado:\n"
-                f"@{current.username} & @{update.effective_user.username}",
-                reply_markup=main_keyboard()
-            )
-            return ConversationHandler.END
-
-    if choice == "➡️ Siguiente":
-        context.user_data['idx'] += 1
-        return await show_next_profile(update, context)
-
-    # Menú
-    await update.message.reply_text("Volviendo al menú principal.",
-                                    reply_markup=main_keyboard())
+    await update.message.reply_text("Opción inválida en Perfil.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
-# —————————————————————
-# Flujo de Perfil
-# —————————————————————
-
-async def perfil_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📝 Envía tu descripción de perfil (o /cancelar):")
-    return DESC
-
+# — Perfil: creación/edición pasos
 async def perfil_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['description'] = update.message.text
-    await update.message.reply_text("📸 Envía tu usuario de Instagram (sin @):")
+    await update.message.reply_text("📸 Tu usuario de Instagram (sin @):")
     return INSTA
 
 async def perfil_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['instagram'] = update.message.text
-    await update.message.reply_text("👤 Selecciona tu género: Masculino/Femenino/Otro")
+    await update.message.reply_text("👤 Tu género (Masculino/Femenino/Otro):")
     return GENDER
 
 async def perfil_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -189,39 +157,80 @@ async def perfil_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def perfil_country(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['country'] = update.message.text
-    await update.message.reply_text("🏙️ ¿Ciudad o provincia?")
+    await update.message.reply_text("🏙️ ¿Y ciudad o provincia?")
     return CITY
 
 async def perfil_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['city'] = update.message.text
-    db.update_profile(
-        update.effective_user.id,
-        context.user_data['description'],
-        context.user_data['instagram'],
-        context.user_data['gender'],
-        context.user_data['country'],
-        context.user_data['city']
+    uid = update.effective_user.id
+    db.save_profile(
+        uid,
+        description=context.user_data['description'],
+        instagram=context.user_data['instagram'],
+        gender=context.user_data['gender'],
+        country=context.user_data['country'],
+        city=update.message.text
     )
-    summary = (
-        "✅ Perfil actualizado!\n"
-        f"📝 {context.user_data['description']}\n"
-        f"📸 instagram.com/{context.user_data['instagram']}\n"
-        f"👤 {context.user_data['gender']}\n"
-        f"📍 {context.user_data['city']}, {context.user_data['country']}"
+    await update.message.reply_text(
+        "✅ Perfil creado/actualizado correctamente.",
+        reply_markup=main_keyboard()
     )
     context.user_data.clear()
-    await update.message.reply_text(summary, reply_markup=main_keyboard())
     return ConversationHandler.END
 
-async def perfil_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# — Emparejar flow
+async def match_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    context.user_data['candidates'] = db.get_potential_matches(uid)
+    context.user_data['idx'] = 0
+    if not context.user_data['candidates']:
+        await update.message.reply_text("No hay perfiles cercanos.", reply_markup=main_keyboard())
+        return ConversationHandler.END
+    return await show_next_profile(update, context)
+
+async def show_next_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    idx = context.user_data['idx']
+    cand = context.user_data['candidates'][idx]
+    text = (
+        f"👤 {cand.fullname}\n"
+        f"📍 {cand.city}, {cand.country}\n"
+        f"📸 instagram.com/{cand.instagram}\n\n"
+        f"{cand.description}\n\n"
+        "¿Qué opinas?"
+    )
+    await update.message.reply_text(text, reply_markup=match_keyboard())
+    return MATCH
+
+async def match_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    choice = update.message.text
+    uid = update.effective_user.id
+    idx = context.user_data['idx']
+    cand = context.user_data['candidates'][idx]
+
+    if choice == "❤️ Me gusta":
+        # devuelve True si match mutuo
+        if db.record_like(uid, cand.id):
+            await update.message.reply_text(
+                f"🎉 ¡Match con @{cand.username}! Podéis hablar enviando mensaje directo.",
+                reply_markup=main_keyboard()
+            )
+            return ConversationHandler.END
+
+    if choice == "🚫 No me gusta":
+        # simplemente avanza
+        context.user_data['idx'] += 1
+        return await show_next_profile(update, context)
+
+    # volver al menú
+    await update.message.reply_text("Volviendo al menú principal.", reply_markup=main_keyboard())
+    return ConversationHandler.END
+
+# — Cancelar
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("❌ Edición de perfil cancelada.", reply_markup=main_keyboard())
+    await update.message.reply_text("Operación cancelada.", reply_markup=main_keyboard())
     return ConversationHandler.END
 
-# —————————————————————
-# Arranque de la App
-# —————————————————————
-
+# — Main launch
 if __name__ == "__main__":
     app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 
@@ -229,30 +238,31 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
 
-    # Conversación Emparejar
-    match_conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^👥 Emparejar$"), match_start)],
-        states={ MATCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, match_choice)] },
-        fallbacks=[CommandHandler("cancelar", perfil_cancel)],
-    )
-    app.add_handler(match_conv)
-
-    # Conversación Perfil
+    # Perfil
     perfil_conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^📄 Perfil$"), perfil_start)],
+        entry_points=[MessageHandler(filters.Regex("^📄 Perfil$"), profile_choice)],
         states={
-            DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_description)],
+            PROFILE_CHOICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, profile_choice)],
+            DESC:  [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_description)],
             INSTA: [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_instagram)],
-            GENDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_gender)],
-            COUNTRY: [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_country)],
-            CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_city)],
+            GENDER:[MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_gender)],
+            COUNTRY:[MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_country)],
+            CITY:  [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_city)],
         },
-        fallbacks=[CommandHandler("cancelar", perfil_cancel)],
+        fallbacks=[CommandHandler("cancelar", cancel)],
     )
     app.add_handler(perfil_conv)
 
-    # Fallback teclado principal
+    # Emparejar
+    match_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^👥 Emparejar$"), match_start)],
+        states={MATCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, match_choice)]},
+        fallbacks=[CommandHandler("cancelar", cancel)],
+    )
+    app.add_handler(match_conv)
+
+    # Fallback menu
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("🤖 Bot iniciado con flujos de Emparejar y Perfil")
-    app.run_polling()
+    logger.info("🤖 Bot iniciado con todos los flujos")
+    app.run_polling(drop_pending_updates=True)
