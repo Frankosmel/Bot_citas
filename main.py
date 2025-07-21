@@ -2,9 +2,8 @@
 import logging
 from telegram import (
     Update,
-    ReplyKeyboardMarkup,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup, KeyboardButton,
+    InlineKeyboardButton, InlineKeyboardMarkup,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -35,21 +34,23 @@ logger = logging.getLogger(__name__)
 
 # ===== Teclados =====
 
-def main_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup([
-        ["👤 Mi Perfil", "🔍 Buscar gente cerca"],
-        ["🔔 Promociones",   "🛑 Salir"]
-    ], resize_keyboard=True)
+def main_keyboard(db: Database, uid: int) -> ReplyKeyboardMarkup:
+    buttons = [
+        [KeyboardButton("👤 Mi Perfil"), KeyboardButton("🔍 Buscar gente cerca")],
+        [KeyboardButton("🏆 Top usuarios"), KeyboardButton("💰 Mi saldo")],
+        [KeyboardButton("🔔 Promociones"), KeyboardButton("🛑 Salir")]
+    ]
+    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def profile_menu_keyboard(has_profile: bool) -> ReplyKeyboardMarkup:
     kb = []
     if not has_profile:
-        kb.append(["🆕 Crear mi perfil"])
+        kb.append([KeyboardButton("🆕 Crear mi perfil")])
     else:
-        kb.append(["👁️ Ver mi perfil"])
-        kb.append(["✏️ Editar mis datos"])
-        kb.append(["❌ Borrar mi perfil"])
-    kb.append(["🔙 Menú principal"])
+        kb.append([KeyboardButton("👁️ Ver mi perfil")])
+        kb.append([KeyboardButton("✏️ Editar mis datos")])
+        kb.append([KeyboardButton("❌ Borrar mi perfil")])
+    kb.append([KeyboardButton("🔙 Menú principal")])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 def search_inline_keyboard(uid: int, super_likes: int) -> InlineKeyboardMarkup:
@@ -57,19 +58,18 @@ def search_inline_keyboard(uid: int, super_likes: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton("❤️ Me interesa", callback_data="search_like"),
         InlineKeyboardButton("🚫 No es para mí", callback_data="search_dislike"),
     ]
-    # Mostrar botón de Super Like sólo si tiene créditos
     if super_likes > 0:
         buttons.append(InlineKeyboardButton("💥 Super Like", callback_data="search_super"))
     return InlineKeyboardMarkup([buttons])
 
 def notify_inline_keyboard(liker_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("❤️ Me interesa",   callback_data=f"notify_like:{liker_id}"),
+        InlineKeyboardButton("❤️ Me interesa", callback_data=f"notify_like:{liker_id}"),
         InlineKeyboardButton("🚫 No es para mí", callback_data=f"notify_dislike:{liker_id}"),
     ]])
 
 def back_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup([["🔙 Menú principal"]], resize_keyboard=True)
+    return ReplyKeyboardMarkup([[KeyboardButton("🔙 Menú principal")]], resize_keyboard=True)
 
 def contact_inline_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
@@ -79,81 +79,99 @@ def contact_inline_keyboard(user_id: int) -> InlineKeyboardMarkup:
 # ===== Handlers =====
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/start — Bienvenida detallada y guía."""
     db = context.bot_data["db"]
     user = update.effective_user
     db.register_user(user.id, user.full_name)
     await update.message.reply_text(
         "🎉 ¡Bienvenid@ al bot *Citas y Amigos*! 🎉\n\n"
-        "Este bot te ofrece:\n"
-        "• Crear y gestionar tu perfil completo.\n"
-        "• Buscar gente cerca y dar ❤️ “Me interesa” o 🚫 “No es para mí”.\n"
-        "• Si hay match mutuo, recibirás un botón de contacto directo.\n"
-        "• Ahora con Super Like: consume un crédito para contactar sin esperar confirmación.\n\n"
-        "🔹 Usa ‘Mi Perfil’ para crear/ver/editar o borrar tu perfil.\n"
-        "🔹 Usa ‘Buscar gente cerca’ para iniciar la búsqueda.\n"
-        "🔹 Envía /help para volver a ver esta guía en cualquier momento.\n\n"
+        "1️⃣ Crea y gestiona tu perfil con foto, descripción, género y ubicación.\n"
+        "2️⃣ Busca gente cerca y da ❤️ “Me interesa” o 🚫 “No es para mí”.\n"
+        "3️⃣ Si hay match mutuo, recibirás un botón para contactar.\n"
+        "4️⃣ Usa 💥 Super Like (crédito) para contactar directo sin esperar confirmación.\n"
+        "5️⃣ Consulta 🏆 Top usuarios y 💰 Mi saldo para ver tus ganancias.\n\n"
         "Selecciona una opción:",
-        reply_markup=main_keyboard(),
+        reply_markup=main_keyboard(db, user.id),
         parse_mode="Markdown"
     )
     return MENU
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/help — Guía de uso."""
     await update.message.reply_text(
-        "🔹 Navega con los botones que aparecen en pantalla.\n"
-        "🔹 ‘Mi Perfil’ para gestionar tu información.\n"
-        "🔹 ‘Buscar gente cerca’ para explorar y dar like/dislike.\n"
-        "🔹 Si tienes créditos de Super Like, verás un botón 💥 en cada perfil.\n"
-        "🔹 Pulsa /cancelar en cualquier momento para volver al menú principal."
+        "🔹 Usa los botones bajo teclado o inline según se indique.\n"
+        "🔹 🏆 Top usuarios muestra el ranking actual.\n"
+        "🔹 💰 Mi saldo muestra tus ganancias (50 CUP/Super Like recibido).\n"
+        "🔹 /cancelar para volver al menú principal."
     )
 
 async def menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manejo de las opciones del menú principal."""
     text = update.message.text
     uid = update.effective_user.id
     db = context.bot_data["db"]
 
     if text == "👤 Mi Perfil":
-        has = db.has_profile(uid)
         await update.message.reply_text(
             "⚙️ Menú de Perfil:",
-            reply_markup=profile_menu_keyboard(has)
+            reply_markup=profile_menu_keyboard(db.has_profile(uid))
         )
         return PROFILE_MENU
 
     if text == "🔍 Buscar gente cerca":
         return await search_start(update, context)
 
-    if text == "🔔 Promociones":
-        prem = db.is_premium(uid)
-        msg = (
-            "Para recibir promociones exclusivas, hazte Premium 💎"
-            if not prem else
-            "✅ No hay promociones nuevas."
+    if text == "🏆 Top usuarios":
+        top = db.get_top_users(5)
+        msg = "🏆 *Top 5 Usuarios*\n\n"
+        for i, u in enumerate(top, start=1):
+            msg += (
+                f"{i}. {u.fullname}\n"
+                f"   ❤️ Likes recibidos: {u.likes_received}\n"
+                f"   💥 SL recibidos: {u.super_likes_received}\n\n"
+            )
+        await update.message.reply_text(msg, parse_mode="Markdown",
+                                        reply_markup=main_keyboard(db, uid))
+        return MENU
+
+    if text == "💰 Mi saldo":
+        me = db.get_user(uid)
+        saldo = (me.super_likes_received or 0) * 50
+        await update.message.reply_text(
+            f"💰 *Tu saldo acumulado:* {saldo} CUP\n\n"
+            "Cada Super Like recibido genera 50 CUP.\n"
+            "Para retirar, ponte en contacto con el administrador.",
+            parse_mode="Markdown",
+            reply_markup=main_keyboard(db, uid)
         )
-        await update.message.reply_text(msg, reply_markup=main_keyboard())
+        return MENU
+
+    if text == "🔔 Promociones":
+        promo_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🥇 1 SL — 360 CUP", callback_data="buy_1")],
+            [InlineKeyboardButton("🥈 5 SL — 1800 CUP", callback_data="buy_5")],
+            [InlineKeyboardButton("🥉 10 SL — 3600 CUP", callback_data="buy_10")],
+        ])
+        await update.message.reply_text(
+            "🎁 Paquetes de Super Likes:\n(1 SL = 360 CUP = 1 USD)",
+            reply_markup=promo_kb
+        )
         return MENU
 
     if text == "🛑 Salir":
         db.unregister_user(uid)
         await update.message.reply_text(
-            "👋 Te has dado de baja. Usa /start para reiniciar.",
-            reply_markup=main_keyboard()
+            "👋 Te has dado de baja. Envía /start para volver.",
+            reply_markup=main_keyboard(db, uid)
         )
         return ConversationHandler.END
 
     await update.message.reply_text(
-        "❌ Opción no válida. Usa los botones del menú.",
-        reply_markup=main_keyboard()
+        "❌ Opción inválida.",
+        reply_markup=main_keyboard(db, uid)
     )
     return MENU
 
 # ----- Gestión de perfil -----
 
 async def profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manejo del submenú de perfil."""
     text = update.message.text
     uid = update.effective_user.id
     db = context.bot_data["db"]
@@ -196,7 +214,7 @@ async def profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.delete_profile(uid)
             await update.message.reply_text(
                 "🗑️ Tu perfil ha sido eliminado.",
-                reply_markup=main_keyboard()
+                reply_markup=main_keyboard(db, uid)
             )
         else:
             await update.message.reply_text(
@@ -209,7 +227,7 @@ async def profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🔙 Menú principal":
         await update.message.reply_text(
             "🔙 Volviendo al menú principal.",
-            reply_markup=main_keyboard()
+            reply_markup=main_keyboard(db, uid)
         )
         return MENU
 
@@ -219,7 +237,7 @@ async def profile_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return PROFILE_MENU
 
-# ----- Crear / Editar perfil -----
+# Crear / Editar perfil
 
 async def perfil_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.photo:
@@ -232,24 +250,18 @@ async def perfil_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def perfil_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['description'] = update.message.text
     await update.message.reply_text(
-        "🔗 Comparte tu usuario de Instagram (sin @), "
-        "o envía — si no lo tienes."
+        "🔗 Comparte tu usuario de Instagram (sin @), o envía — si no lo tienes."
     )
     return INSTA
 
 async def perfil_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['instagram'] = update.message.text.strip() or ""
-    await update.message.reply_text(
-        "⚧️ Indica tu género (por ejemplo: Hombre, Mujer u Otro)."
-    )
+    await update.message.reply_text("⚧️ Indica tu género (Hombre, Mujer u Otro).")
     return GENDER
 
 async def perfil_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['gender'] = update.message.text
-    await update.message.reply_text(
-        "🔎 ¿Qué género te interesa conocer? "
-        "(Hombre, Mujer u Otro)."
-    )
+    await update.message.reply_text("🔎 ¿Qué género te interesa conocer?")
     return PREF_GENDER
 
 async def perfil_pref_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -279,12 +291,12 @@ async def perfil_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "✅ Tu perfil ha sido guardado correctamente.\n"
         "👁️ Usa ‘Ver mi perfil’ para revisarlo.",
-        reply_markup=main_keyboard()
+        reply_markup=main_keyboard(db, uid)
     )
     context.user_data.clear()
     return MENU
 
-# ----- Búsqueda de perfiles -----
+# Búsqueda de perfiles
 
 async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -293,8 +305,8 @@ async def search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['idx'] = 0
     if not context.user_data['candidates']:
         await update.message.reply_text(
-            "🚫 No hay perfiles cerca de ti.",
-            reply_markup=main_keyboard()
+            "🚫 No hay perfiles cerca.",
+            reply_markup=main_keyboard(db, uid)
         )
         return MENU
     return await show_next(update, context)
@@ -304,7 +316,8 @@ async def show_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cand = context.user_data['candidates'][idx]
     uid = update.effective_user.id
     db = context.bot_data["db"]
-    super_likes = db.get_user(uid).super_likes or 0
+    sl_credits = db.get_user(uid).super_likes or 0
+
     await update.message.reply_photo(
         photo=cand.photo_file_id,
         caption=(
@@ -313,7 +326,7 @@ async def show_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🏙️ Ciudad: {cand.city}\n\n"
             f"📝 {cand.description}"
         ),
-        reply_markup=search_inline_keyboard(uid, super_likes),
+        reply_markup=search_inline_keyboard(uid, sl_credits),
         parse_mode="Markdown"
     )
     return SEARCH
@@ -326,9 +339,9 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     idx = context.user_data['idx']
     cand = context.user_data['candidates'][idx]
 
-    # Like normal
     if q.data == "search_like":
         me = db.get_profile(uid)
+        db.record_like(uid, cand.id)
         await context.bot.send_photo(
             chat_id=cand.id,
             photo=me.photo_file_id,
@@ -343,57 +356,53 @@ async def search_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-    # Super Like directo
     elif q.data == "search_super":
         if db.use_super_like(uid):
             me = db.get_profile(uid)
-            # Envío directo a cand con contacto
+            db.record_super_like(uid, cand.id)
             await context.bot.send_photo(
                 chat_id=cand.id,
                 photo=me.photo_file_id,
                 caption=(
-                    f"💥 *Super Like* de *{me.fullname}*🎉\n\n"
+                    f"💥 *Super Like* de *{me.fullname}* 🎉\n\n"
                     f"👤 {me.fullname}\n"
                     f"🌎 País: {me.country}\n"
                     f"🏙️ Ciudad: {me.city}\n\n"
                     f"📝 {me.description}\n\n"
-                    f"¡No hace falta confirmación, ya puedes contactar!"
+                    "¡No hace falta confirmación, aquí tienes el contacto!"
                 ),
                 reply_markup=contact_inline_keyboard(uid),
                 parse_mode="Markdown"
             )
             await context.bot.send_message(
                 chat_id=uid,
-                text="✅ Has usado 1 Super Like. Te he puesto en contacto directo.",
-                reply_markup=main_keyboard()
+                text="✅ Has usado 1 Super Like. Se ha establecido el contacto.",
+                reply_markup=main_keyboard(db, uid)
             )
         else:
             await context.bot.send_message(
                 chat_id=uid,
-                text="❌ No tienes Super Likes disponibles. Ve a Promociones para comprar.",
-                reply_markup=main_keyboard()
+                text="❌ No tienes Super Likes. Ve a Promociones para comprar.",
+                reply_markup=main_keyboard(db, uid)
             )
 
-    # Dislike o después de cualquier acción, avanzamos
     context.user_data['idx'] += 1
     if context.user_data['idx'] >= len(context.user_data['candidates']):
-        # Fin de lista
         await q.edit_message_caption(
             caption=q.message.caption + "\n\n🚫 Se acabaron los perfiles.",
             reply_markup=None
         )
         await context.bot.send_message(
             chat_id=uid,
-            text="🔙 Pulsa ‘Menú principal’ para regresar.",
+            text="🔙 Pulsa ‘Menú principal’ para volver.",
             reply_markup=back_keyboard()
         )
         return MENU
 
-    # Borrar inline anterior y mostrar siguiente
     await q.delete_message()
     return await show_next(update, context)
 
-# ----- Callback de confirmación de match -----
+# Confirmación de match mutuo
 
 async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -404,12 +413,10 @@ async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     receiver_id = q.from_user.id
 
     if data == "notify_like":
-        # Editar notificación con match y contacto
         await q.edit_message_caption(
             caption=q.message.caption + "\n\n🎉 ¡Match mutuo!",
             reply_markup=contact_inline_keyboard(liker_id)
         )
-        # Notificar a quien dio like primero
         other = db.get_profile(receiver_id)
         await context.bot.send_photo(
             chat_id=liker_id,
@@ -426,12 +433,47 @@ async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await q.edit_message_text("❌ Notificación cerrada.", reply_markup=None)
 
-# ----- Cancelar -----
+# Comprar Super Likes
+
+async def buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
+    db = context.bot_data["db"]
+
+    if q.data == "buy_1":
+        db.purchase_super_likes(uid, 1)
+        text = "✅ Has comprado 1 Super Like."
+    elif q.data == "buy_5":
+        db.purchase_super_likes(uid, 5)
+        text = "✅ Has comprado 5 Super Likes."
+    else:
+        db.purchase_super_likes(uid, 10)
+        text = "✅ Has comprado 10 Super Likes."
+
+    credits = db.get_user(uid).super_likes or 0
+    await q.edit_message_text(f"{text}\n🎉 Ahora tienes {credits} SL.", reply_markup=None)
+
+# Grant Super (admin)
+
+async def grant_super(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id not in config.ADMINS:
+        return await update.message.reply_text("❌ No estás autorizado.")
+    args = context.args
+    if len(args) != 2 or not args[0].isdigit() or not args[1].isdigit():
+        return await update.message.reply_text("Uso: /grant_super <user_id> <cantidad>")
+    target, cnt = int(args[0]), int(args[1])
+    db = context.bot_data["db"]
+    db.purchase_super_likes(target, cnt)
+    await update.message.reply_text(f"✅ Otorgados {cnt} SL a {target}.")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    db = context.bot_data["db"]
     await update.message.reply_text(
         "👋 Operación cancelada.",
-        reply_markup=main_keyboard()
+        reply_markup=main_keyboard(db, uid)
     )
     return ConversationHandler.END
 
@@ -444,22 +486,24 @@ def main():
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            MENU:          [MessageHandler(filters.TEXT & ~filters.COMMAND, menu_choice)],
-            PROFILE_MENU:  [MessageHandler(filters.TEXT & ~filters.COMMAND, profile_menu)],
-            PHOTO:         [MessageHandler(filters.PHOTO, perfil_photo)],
-            DESC:          [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_description)],
-            INSTA:         [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_instagram)],
-            GENDER:        [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_gender)],
-            PREF_GENDER:   [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_pref_gender)],
-            COUNTRY:       [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_country)],
-            CITY:          [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_city)],
-            SEARCH:        [CallbackQueryHandler(search_callback, pattern="^search_")],
+            MENU:         [MessageHandler(filters.TEXT & ~filters.COMMAND, menu_choice)],
+            PROFILE_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, profile_menu)],
+            PHOTO:        [MessageHandler(filters.PHOTO, perfil_photo)],
+            DESC:         [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_description)],
+            INSTA:        [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_instagram)],
+            GENDER:       [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_gender)],
+            PREF_GENDER:  [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_pref_gender)],
+            COUNTRY:      [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_country)],
+            CITY:         [MessageHandler(filters.TEXT & ~filters.COMMAND, perfil_city)],
+            SEARCH:       [CallbackQueryHandler(search_callback, pattern="^search_")],
         },
         fallbacks=[CommandHandler("cancelar", cancel)],
     )
 
     app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(notify_callback, pattern="^notify_"))
+    app.add_handler(CallbackQueryHandler(buy_callback, pattern="^buy_"))
+    app.add_handler(CommandHandler("grant_super", grant_super))
     app.add_handler(CommandHandler("help", help_command))
 
     logger.info("🤖 Bot iniciado correctamente")
